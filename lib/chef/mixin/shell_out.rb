@@ -61,22 +61,12 @@ class Chef
       # generally its best to use shell_out_compact! in code and setup expectations on shell_out! in tests
       #
 
-      def shell_out_compact(*args, **options)
-        options = Chef::Mixin::ShellOut.maybe_add_timeout(self, options)
-        if options.empty?
-          shell_out(*clean_array(*args))
-        else
-          shell_out(*clean_array(*args), **options)
-        end
+      def shell_out_compact(*args, **options) # FIXME: deprecate
+        shell_out_compact(*args, **options)
       end
 
-      def shell_out_compact!(*args, **options)
-        options = Chef::Mixin::ShellOut.maybe_add_timeout(self, options)
-        if options.empty?
-          shell_out!(*clean_array(*args))
-        else
-          shell_out!(*clean_array(*args), **options)
-        end
+      def shell_out_compact!(*args, **options) # FIXME: deprecate
+        shell_out_compact!(*args, **options)
       end
 
       # helper sugar for resources that support passing timeouts to shell_out
@@ -92,11 +82,11 @@ class Chef
         options
       end
 
-      def shell_out_compact_timeout(*args, **options)
+      def shell_out_compact_timeout(*args, **options) # FIXME: deprecate
         shell_out_compact(*args, **options)
       end
 
-      def shell_out_compact_timeout!(*args, **options)
+      def shell_out_compact_timeout!(*args, **options) # FIXME: deprecate
         shell_out_compact!(*args, **options)
       end
 
@@ -109,6 +99,7 @@ class Chef
       # generally must support UTF-8 unicode.
       def shell_out(*args, **options)
         options = options.dup
+        options = Chef::Mixin::ShellOut.maybe_add_timeout(self, options)
         default_env = options.delete(:default_env)
         default_env = true if default_env.nil?
         if default_env
@@ -120,7 +111,7 @@ class Chef
             env_path => sanitized_path,
           }.update(options[env_key] || {})
         end
-        shell_out_command(*args, **options)
+        shell_out_command(*clean_array(*args), **options)
       end
 
       # call shell_out (using en_US.UTF-8) and raise errors
@@ -144,11 +135,13 @@ class Chef
       #
       # @param args [String] variable number of string arguments
       # @return [String] nicely concatenated string or empty string
-      def a_to_s(*args)
+      def a_to_s(*args) # FIXME: deprecate
         # can't quite deprecate this yet
         #Chef.deprecated(:package_misc, "a_to_s is deprecated use shell_out_compact or shell_out_compact_timeout instead")
         args.flatten.reject { |i| i.nil? || i == "" }.map(&:to_s).join(" ")
       end
+
+      private
 
       # Helper for subclasses to reject nil out of an array.  It allows
       # using the array form of shell_out (which avoids the need to surround arguments with
@@ -166,11 +159,10 @@ class Chef
       #
       # @param args [String] variable number of string arguments
       # @return [Array] array of strings with nil and null string rejection
+
       def clean_array(*args)
         args.flatten.compact.map(&:to_s)
       end
-
-      private
 
       def shell_out_command(*command_args)
         cmd = Mixlib::ShellOut.new(*command_args)

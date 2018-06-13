@@ -119,6 +119,7 @@ resource_handler_map ||= nil
 RSpec.configure do |config|
   config.include(Matchers)
   config.include(MockShellout::RSpec)
+  config.include(ReceiveWithFlatStr)
   config.filter_run :focus => true
   config.filter_run_excluding :external => true
 
