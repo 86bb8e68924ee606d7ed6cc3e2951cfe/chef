@@ -668,11 +668,11 @@ class Chef
         end
       end
 
-      def shell_out(*command_args)
+      def shell_out_with_timeout(*command_args) # FIXME: deprecated
         shell_out(*add_timeout_option(command_args))
       end
 
-      def shell_out!(*command_args)
+      def shell_out_with_timeout!(*command_args) # FIXME: deprecated
         shell_out!(*add_timeout_option(command_args))
       end
 

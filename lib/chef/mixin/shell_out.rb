@@ -22,51 +22,103 @@ class Chef
   module Mixin
     module ShellOut
       include Chef::Mixin::PathSanity
+      extend Chef::Mixin::PathSanity
 
       # PREFERRED APIS:
       #
-      # shell_out_compact and shell_out_compact! flatten their array arguments and remove nils and pass
-      # the resultant array to shell_out.  this actually eliminates spaces-in-args bugs because this:
+      # all consumers should now call shell_out!/shell_out.
       #
-      # shell_out!("command #{arg}")
+      # on unix the shell_out API supports the clean_array() kind of syntax (below) so that
+      # array args are flat/compact/to_s'd.  on windows, array args aren't supported to its
+      # up to the caller to join(" ") on arrays of strings.
       #
-      # becomes two arguments if arg has spaces and requires quotations:
+      # the shell_out_compacted/shell_out_compacted! APIs are private but are intended for use
+      # in rspec tests, and should ideally always be used to make code refactorings that do not
+      # change behavior easier:
       #
-      # shell_out!("command '#{arg}'")
+      # allow(provider).to receive(:shell_out_compacted!).with("foo", "bar", "baz")
+      # provider.shell_out!("foo", [ "bar", nil, "baz"])
+      # provider.shell_out!(["foo", nil, "bar" ], ["baz"])
       #
-      # using shell_out_compact! this becomes:
-      #
-      # shell_out_compact!("command", arg)
-      #
-      # and spaces in the arg just works and it does not become two arguments (and the shell quoting around
-      # the argument must actually be removed).
-      #
-      # there's also an implicit join between all the array elements, and nested arrays are flattened which
-      # means that odd where-do-i-put-the-spaces options handling just works, and instead of this:
-      #
-      #    opts = ""                     # needs to be empty string for when foo and bar are both missing
-      #    opts << " -foo" if needs_foo? # needs the leading space on both of these
-      #    opts << " -bar" if needs_bar?
-      #    shell_out!("cmd#{opts}")      # have to think way too hard about why there's no space here
-      #
-      # becomes:
-      #
-      #    opts = []
-      #    opts << "-foo" if needs_foo?
-      #    opts << "-bar" if needs_bar?
-      #    shell_out_compact!("cmd", opts)
-      #
-      # and opts can be an empty array or nil and it'll work out fine.
-      #
-      # generally its best to use shell_out_compact! in code and setup expectations on shell_out! in tests
+      # note that shell_out_compacted also includes adding the magical timeout option to force
+      # people to setup expectations on that value explicitly.  it does not include the default_env
+      # mangling in order to avoid users having to setup an expectation on anything other than
+      # setting `default_env: false` and allow us to make tweak to the default_env without breaking
+      # a thousand unit tests.
       #
 
       def shell_out_compact(*args, **options) # FIXME: deprecate
-        shell_out_compact(*args, **options)
+        if options.empty?
+          shell_out_compact(*args)
+        else
+          shell_out_compact(*args, **options)
+        end
       end
 
       def shell_out_compact!(*args, **options) # FIXME: deprecate
-        shell_out_compact!(*args, **options)
+        if options.empty?
+          shell_out_compact!(*args)
+        else
+          shell_out_compact!(*args, **options)
+        end
+      end
+
+      def shell_out_compact_timeout(*args, **options) # FIXME: deprecate
+        if options.empty?
+          shell_out_compact(*args)
+        else
+          shell_out_compact(*args, **options)
+        end
+      end
+
+      def shell_out_compact_timeout!(*args, **options) # FIXME: deprecate
+        if options.empty?
+          shell_out_compact!(*args)
+        else
+          shell_out_compact!(*args, **options)
+        end
+      end
+
+      def shell_out_with_systems_locale(*args, **options) # FIXME: deprecate
+        if options.empty?
+          shell_out(*args, default_env: false)
+        else
+          shell_out(*args, default_env: false, **options)
+        end
+      end
+
+      def shell_out_with_systems_locale!(*args, **options) # FIXME: deprecate
+        if options.empty?
+          shell_out!(*args, default_env: false)
+        else
+          shell_out!(*args, default_env: false, **options)
+        end
+      end
+
+      def a_to_s(*args) # FIXME: deprecate
+        # can't quite deprecate this yet
+        #Chef.deprecated(:package_misc, "a_to_s is deprecated use shell_out_compact or shell_out_compact_timeout instead")
+        args.flatten.reject { |i| i.nil? || i == "" }.map(&:to_s).join(" ")
+      end
+
+      def shell_out(*args, **options)
+        options = options.dup
+        options = Chef::Mixin::ShellOut.maybe_add_timeout(self, options)
+        if options.empty?
+          shell_out_compacted(*Chef::Mixin::ShellOut.clean_array(*args))
+        else
+          shell_out_compacted(*Chef::Mixin::ShellOut.clean_array(*args), **options)
+        end
+      end
+
+      def shell_out!(*args, **options)
+        options = options.dup
+        options = Chef::Mixin::ShellOut.maybe_add_timeout(self, options)
+        if options.empty?
+          shell_out_compacted!(*Chef::Mixin::ShellOut.clean_array(*args))
+        else
+          shell_out_compacted!(*Chef::Mixin::ShellOut.clean_array(*args), **options)
+        end
       end
 
       # helper sugar for resources that support passing timeouts to shell_out
@@ -82,24 +134,11 @@ class Chef
         options
       end
 
-      def shell_out_compact_timeout(*args, **options) # FIXME: deprecate
-        shell_out_compact(*args, **options)
-      end
-
-      def shell_out_compact_timeout!(*args, **options) # FIXME: deprecate
-        shell_out_compact!(*args, **options)
-      end
-
-      # shell_out! runs a command on the system and will raise an error if the command fails, which is what you want
-      # for debugging, shell_out and shell_out! both will display command output to the tty when the log level is debug
-      # Generally speaking, 'extend Chef::Mixin::ShellOut' in your recipes and include 'Chef::Mixin::ShellOut' in your LWRPs
-      # You can also call Mixlib::Shellout.new directly, but you lose all of the above functionality
-
-      # we use 'en_US.UTF-8' by default because we parse localized strings in English as an API and
-      # generally must support UTF-8 unicode.
-      def shell_out(*args, **options)
+      # helper function to mangle options when `default_env` is true
+      #
+      # @api private
+      def self.apply_default_env(options)
         options = options.dup
-        options = Chef::Mixin::ShellOut.maybe_add_timeout(self, options)
         default_env = options.delete(:default_env)
         default_env = true if default_env.nil?
         if default_env
@@ -111,37 +150,38 @@ class Chef
             env_path => sanitized_path,
           }.update(options[env_key] || {})
         end
-        shell_out_command(*clean_array(*args), **options)
-      end
-
-      # call shell_out (using en_US.UTF-8) and raise errors
-      def shell_out!(*command_args)
-        cmd = shell_out(*command_args)
-        cmd.error!
-        cmd
-      end
-
-      def shell_out_with_systems_locale(*args, **options) # FIXME: deprecate
-        shell_out(*args, default_env: false, **options)
-      end
-
-      def shell_out_with_systems_locale!(*args, **options) # FIXME: deprecate
-        shell_out!(*args, default_env: false, **options)
-      end
-
-      # Helper for subclasses to convert an array of string args into a string.  It
-      # will compact nil or empty strings in the array and will join the array elements
-      # with spaces, without introducing any double spaces for nil/empty elements.
-      #
-      # @param args [String] variable number of string arguments
-      # @return [String] nicely concatenated string or empty string
-      def a_to_s(*args) # FIXME: deprecate
-        # can't quite deprecate this yet
-        #Chef.deprecated(:package_misc, "a_to_s is deprecated use shell_out_compact or shell_out_compact_timeout instead")
-        args.flatten.reject { |i| i.nil? || i == "" }.map(&:to_s).join(" ")
+        options
       end
 
       private
+
+      # this SHOULD be used for setting up expectations in rspec, see banner comment at top.
+      #
+      # the private constraint is meant to avoid code calling this directly, rspec expectations are fine.
+      #
+      def shell_out_compacted(*args, **options)
+        options = Chef::Mixin::ShellOut.apply_default_env(options)
+        if options.empty?
+          Chef::Mixin::ShellOut.shell_out_command(*args)
+        else
+          Chef::Mixin::ShellOut.shell_out_command(*args, **options)
+        end
+      end
+
+      # this SHOULD be used for setting up expectations in rspec, see banner comment at top.
+      #
+      # the private constraint is meant to avoid code calling this directly, rspec expectations are fine.
+      #
+      def shell_out_compacted!(*args, **options)
+        options = Chef::Mixin::ShellOut.apply_default_env(options)
+        cmd = if options.empty?
+                Chef::Mixin::ShellOut.shell_out_command(*args)
+              else
+                Chef::Mixin::ShellOut.shell_out_command(*args, **options)
+              end
+        cmd.error!
+        cmd
+      end
 
       # Helper for subclasses to reject nil out of an array.  It allows
       # using the array form of shell_out (which avoids the need to surround arguments with
@@ -160,18 +200,22 @@ class Chef
       # @param args [String] variable number of string arguments
       # @return [Array] array of strings with nil and null string rejection
 
-      def clean_array(*args)
+      def self.clean_array(*args)
         args.flatten.compact.map(&:to_s)
       end
 
-      def shell_out_command(*command_args)
-        cmd = Mixlib::ShellOut.new(*command_args)
+      def self.shell_out_command(*args, **options)
+        cmd = if options.empty?
+                Mixlib::ShellOut.new(*args)
+              else
+                Mixlib::ShellOut.new(*args, **options)
+              end
         cmd.live_stream ||= io_for_live_stream
         cmd.run_command
         cmd
       end
 
-      def io_for_live_stream
+      def self.io_for_live_stream
         if STDOUT.tty? && !Chef::Config[:daemon] && Chef::Log.debug?
           STDOUT
         else
@@ -179,7 +223,7 @@ class Chef
         end
       end
 
-      def env_path
+      def self.env_path
         if Chef::Platform.windows?
           "Path"
         else
