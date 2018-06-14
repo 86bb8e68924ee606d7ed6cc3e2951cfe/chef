@@ -27,7 +27,7 @@ class Chef
 
       provides :execute
 
-      def_delegators :new_resource, :command, :returns, :environment, :user, :domain, :password, :group, :cwd, :umask, :creates, :elevated, :default_env
+      def_delegators :new_resource, :command, :returns, :environment, :user, :domain, :password, :group, :cwd, :umask, :creates, :elevated, :default_env, :login
 
       def load_current_resource
         current_resource = Chef::Resource::Execute.new(new_resource.name)
@@ -108,6 +108,7 @@ class Chef
           end
         end
         opts[:elevated] = elevated if elevated
+        opts[:login]    = login if login
         opts
       end
 
