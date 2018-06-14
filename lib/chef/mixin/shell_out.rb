@@ -21,7 +21,6 @@ require "chef/mixin/path_sanity"
 class Chef
   module Mixin
     module ShellOut
-      include Chef::Mixin::PathSanity
       extend Chef::Mixin::PathSanity
 
       # PREFERRED APIS:
